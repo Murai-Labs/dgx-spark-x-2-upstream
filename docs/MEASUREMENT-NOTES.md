@@ -88,6 +88,46 @@ staging the next experiment in parallel.
 
 ---
 
+## 7. A single sample will flatter you, and it flattered us
+
+We measured the patched b12x backend once and read **65.5 tok/s** at p2048. Five full runs
+of the same script against the same unchanged server gave:
+
+```
+p2048  median=60.43  mean=60.95  min=59.74  max=63.66  sd=1.38  n=5
+       samples: 60.4, 63.7, 59.7, 60.4, 60.5
+```
+
+The single sample was near the top of the observed range and overstated the result by
+~8%. Note that the spread is *not* wide — sd 1.4 on a 60 tok/s figure is tight. The
+problem isn't instability; it's that one draw from a tight distribution still lands
+somewhere, and "somewhere" was the high end.
+
+This is the cheapest error to avoid on this list and the one we made most recently. Five
+runs cost about fifteen minutes.
+
+## 8. Acceptance metrics are per-workload — match the window to the claim
+
+`SpecDecoding metrics` lines are emitted continuously and reflect **whatever traffic was
+running in that window**. On the same server, same config, minutes apart:
+
+| window | traffic | mean accept length | avg draft acceptance |
+|---|---|---|---|
+| 18:55:15–35 | short warm-up prompts | 4.78 → 5.01 | 75.6 → **80.2%** |
+| 18:58:45–59:05 | the actual benchmark | 3.17–3.38 | **43–48%** |
+
+Both are true statements about the server. Only one describes the workload whose tok/s
+you are quoting.
+
+We briefly read the 80.2% figure as evidence that acceptance had saturated at k=5 and
+that raising `k` would therefore pay off. On the benchmark workload, per-position
+acceptance decays `0.81, 0.56, 0.37, 0.26, 0.17` — the 5th draft position lands under 20%
+of the time, so a larger `k` buys draft cost for almost nothing. That matches our direct
+measurement that k=7 *reduced* throughput, which we would have contradicted on the
+strength of a mis-scoped metric.
+
+---
+
 ## What we'd recommend instead
 
 For comparable numbers, report **all** of:
@@ -96,9 +136,11 @@ For comparable numbers, report **all** of:
 2. `max_tokens`, whether `ignore_eos`/`min_tokens` were set, and observed min/max output length.
 3. Prompt-nonce policy (cacheable or not) and whether prefix caching was enabled.
 4. Warm-up performed.
-5. Repeat count and spread — not a single sample.
+5. Repeat count and spread — not a single sample. Report median, sd and n.
 6. Token source: server `usage` vs client-side counting.
 7. Concurrency, `max_num_seqs`, and whether other I/O was running.
+8. For speculative decoding: the acceptance window used, and that it covers the
+   benchmark traffic rather than warm-up or idle traffic.
 
 The single most useful convention would be for the community to standardise on one
 harness with fixed output length and a stated caching policy. Until then, cross-source

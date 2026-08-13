@@ -1,0 +1,21 @@
+DeepSeek-V4-Flash on 2x DGX Spark, on upstream-lineage vLLM
+
+Copyright (c) 2026 Murai Labs
+
+This repository contains measurement data, reproducibility scripts, deployment
+configuration and two small source patches for serving DeepSeek-V4-Flash-0731
+across two NVIDIA DGX Spark (GB10, sm_121) nodes.
+
+It is a third-party contribution. It is NOT an official DeepSeek, vLLM, NVIDIA
+or FlashInfer release, and no endorsement by any of them is implied.
+
+Model weights and tokenizer are NOT included in this repository.
+
+This work builds directly on prior community work -- notably MiaAI-Lab's
+2x DGX Spark recipe and benchmark harness, and eugr's sm_12x build harness and
+prebuilt b12x container image. The benchmark numbers published here were
+produced with MiaAI-Lab's benchmark-0731.py, used unmodified. See the Credits
+section of README.md for full attribution.
+
+Third-party software and models retain their original copyrights and licences.
+See THIRD_PARTY_NOTICES.md.

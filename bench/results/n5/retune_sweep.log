@@ -1,0 +1,16 @@
+### ARM baseline5 : DS4_IMAGE=vllm-node-main:latest MOE_BACKEND=auto KV_CACHE_DTYPE=fp8_ds_mla
+  GPU KV cache size: 1,349,161 tokens
+  Using 'DEEPGEMM_MXFP4' Mxfp4 MoE backend
+  baseline5 p256   median= 53.92 sd= 3.77 n=5 [53.1, 53.9, 55.9, 60.4, 48.8]
+  baseline5 p2048  median= 51.52 sd= 2.09 n=5 [51.5, 47.9, 50.8, 54.3, 52.2]
+  baseline5 p8192  median= 53.59 sd= 1.20 n=5 [53.4, 53.5, 54.3, 53.6, 56.6]
+### ARM nvfp4kv : DS4_IMAGE=vllm-node-b12x-fix:latest MOE_BACKEND=b12x KV_CACHE_DTYPE=nvfp4_ds_mla
+  BOOT FAILED
+    vllm-ds4-1  | (APIServer pid=1)     raise RuntimeError(
+### ARM b12x_hi : DS4_IMAGE=vllm-node-b12x-fix:latest MOE_BACKEND=b12x KV_CACHE_DTYPE=fp8_ds_mla GPU_MEMORY_UTILIZATION=0.88
+  GPU KV cache size: 1,389,891 tokens
+  Using 'B12X' Mxfp4 MoE backend
+  b12x_hi p256   median= 65.67 sd= 2.00 n=5 [65.8, 66.4, 65.7, 61.1, 63.1]
+  b12x_hi p2048  median= 63.70 sd= 6.39 n=5 [48.4, 66.0, 63.0, 63.9, 63.7]
+  b12x_hi p8192  median= 65.04 sd= 2.87 n=5 [66.1, 63.6, 69.5, 65.0, 60.7]
+### retune done
