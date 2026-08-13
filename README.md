@@ -22,6 +22,12 @@ uncertain or a comparison isn't like-for-like, it says so.
 Stock `vllm/vllm-openai:v0.27.1-aarch64` **cannot** serve this model on GB10. It fails
 in DeepGEMM with `Unknown SF transformation`, then `Unsupported architecture`.
 
+**Status update (2026-08-13):** both DeepGEMM failures are now fixed upstream by
+[vllm#52035](https://github.com/vllm-project/vllm/pull/52035) (merged 2026-08-12), which
+repins DeepGEMM to `deepseek-ai/DeepGEMM 8b1392b9` (nv_dev tip). We validated the
+equivalent repin via #51959's branch at `a6b593d`; **we have not tested the merged
+`8b1392b9` pin on sm_121**. The b12x blocker (finding 2) remains open.
+
 ---
 
 ## Three findings worth reporting upstream
@@ -72,17 +78,17 @@ Also note b12x is *deliberately excluded from auto-selection* upstream — the N
 oracle's candidate list is `['FLASHINFER_TRTLLM', 'FLASHINFER_CUTEDSL',
 'FLASHINFER_CUTLASS', 'VLLM_CUTLASS', 'MARLIN', 'HUMMING', 'EMULATION']`.
 
-### 3. eugr's b12x SwiGLU patch no longer applies to current vLLM main
+### 3. ~~eugr's b12x SwiGLU patch no longer applies to current vLLM main~~ RETRACTED
 
-`eugr/spark-vllm-docker`'s `docker/patch_vllm_flashinfer_b12x_swigluoai.py` hard-fails:
+**This finding was wrong and is retracted.** We hit
+`expected one B12x activation support predicate source anchor, found 0` against a clone of
+`eugr/spark-vllm-docker` pinned at `3ad5610` (2026-08-11). It was fixed the very next day in
+[`21aa9948`](https://github.com/eugr/spark-vllm-docker/commit/21aa9948), which adds an anchor
+variant for the newer `_supports_activation` shape that includes `MoEActivation.GELU_TANH`.
 
-```
-targeted vLLM PR #47392 patch failed: expected one B12x activation support
-predicate source anchor, found 0; the vLLM source shape has changed
-```
-
-Since that repo's default `--vllm-ref` is `main`, its **default build path may currently
-be broken**, not just fork builds. We worked around it by making that one step non-fatal.
+Their patch tracks current `main` correctly. We did not re-check before writing it up.
+Recorded here rather than deleted, because "verify the upstream state before reporting a
+downstream bug" is the actual lesson.
 
 ---
 
