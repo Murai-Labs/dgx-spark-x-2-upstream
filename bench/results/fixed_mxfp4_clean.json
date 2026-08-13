@@ -1,0 +1,32 @@
+[
+  {
+    "label": "mxfp4_clean",
+    "prompt_tokens": 2048,
+    "concurrency": 1,
+    "max_tokens": 200,
+    "repeats": 2,
+    "prefill_tok_s": 480.89952649315137,
+    "decode_tok_s": 100.72880677320346,
+    "decode_spread": 5.53566321117566,
+    "ttft_s": 4.0083330089983065,
+    "aggregate_tok_s": 33.35892387694821,
+    "aggregate_spread": 0.24723638795467906,
+    "out_tok_min": 200,
+    "out_tok_max": 200
+  },
+  {
+    "label": "mxfp4_clean",
+    "prompt_tokens": 2048,
+    "concurrency": 4,
+    "max_tokens": 200,
+    "repeats": 1,
+    "prefill_tok_s": 206.2884440988655,
+    "decode_tok_s": 43.62600640575474,
+    "decode_spread": 0.0,
+    "ttft_s": 9.371756492488203,
+    "aggregate_tok_s": 54.79022842033377,
+    "aggregate_spread": 0.0,
+    "out_tok_min": 200,
+    "out_tok_max": 200
+  }
+]
