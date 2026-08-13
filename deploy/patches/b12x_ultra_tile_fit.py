@@ -37,8 +37,12 @@ selection falls through to the (64, 256) default, which fits.
 This is conservative: it can only *prevent* an upgrade that was going to raise.
 It cannot change any configuration that already worked.
 
-Applies cleanly to the b12x shipped in eugr/spark-vllm-b12x as of 2026-08-13.
-Idempotent — running twice is a no-op (the anchor no longer matches).
+Filed upstream as https://github.com/local-inference-lab/b12x/issues/182 --
+check whether it is fixed there before applying this.
+
+Applies cleanly to b12x 1.2.3 (as shipped in eugr/spark-vllm-b12x, and as on
+local-inference-lab/b12x master as of 2026-08-13). Idempotent -- running twice
+is a no-op (the anchor no longer matches).
 """
 
 import sys

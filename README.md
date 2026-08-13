@@ -73,20 +73,25 @@ Patching it changes backend selection as intended, but we could not exercise it
 end-to-end because the NVFP4 checkpoint fails in the weight loader first. **We verified
 the plumbing, not the arithmetic.** Treat it as a lead, not a validated fix.
 
-### Where to file these
+### Filed upstream
 
-`b12x` is a PyPI package (**v1.2.3, author Luke Alonso**, *"DGX Spark and RTX 6000-focused
-inference kernel library"*) whose distribution metadata carries **no homepage, project URL
-or licence field**, so the direct venue is unclear.
+**Finding 4 is filed as
+[local-inference-lab/b12x#182](https://github.com/local-inference-lab/b12x/issues/182).**
 
-**We understand b12x is being upstreamed into vLLM officially.** If so, both findings
-belong there, and finding 4 is time-sensitive: the FC2 tile-selection bug should be fixed
-**before** b12x lands, or every GB10 user hits it on first boot with an error that gives no
-hint it is a shared-memory-class problem. The clamp-allowlist item becomes a normal vLLM PR
-at the same time.
+b12x lives at [local-inference-lab/b12x](https://github.com/local-inference-lab/b12x)
+(Apache-2.0, author Luke Alonso). The *installed distribution metadata* carries no homepage
+or project URL, which is why earlier revisions of this README said the venue was unknown.
 
-Pointers to the right issue tracker or the b12x maintainer are welcome — both fixes are far
-more useful upstream than vendored here.
+The defect is present on current `master`, not only in the 1.2.3 vendored by
+`eugr/spark-vllm-b12x` — checked against the repository before filing.
+
+**Timing note.** b12x is being integrated into vLLM
+([vllm-project/vllm#40082](https://github.com/vllm-project/vllm/pull/40082)). If it lands
+with this bug, every GB10 user hits it on first boot — after a full weight load — with an
+error that gives no hint it is a shared-memory-class problem.
+
+The clamp-allowlist item is **not** filed. It is a lead, not a validated fix (see above),
+and we would rather test it end-to-end first than file something we cannot stand behind.
 
 ---
 
@@ -436,9 +441,9 @@ The two patch scripts in [`deploy/patches/`](deploy/patches/) modify third-party
 repository. vLLM is Apache-2.0; DeepGEMM, FlashInfer, PyTorch and Triton retain their own
 licences; model weights retain theirs.
 
-`b12x` ships **no licence field, homepage or project URL** in its distribution metadata, so
-we do not state its licence — we do not redistribute it, and it reaches this stack only as
-a component of the third-party `eugr/spark-vllm-b12x` image.
+`b12x` is **Apache-2.0** ([local-inference-lab/b12x](https://github.com/local-inference-lab/b12x)).
+We do not redistribute it — it reaches this stack only as a component of the third-party
+`eugr/spark-vllm-b12x` image, and our patch modifies it inside a locally built image.
 
 Full component-by-component attribution, with the exact versions and revisions under test:
 **[`NOTICE`](NOTICE)** and **[`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)**.

@@ -55,19 +55,20 @@ retain their own licences.
 
 ## b12x
 
+- https://github.com/local-inference-lab/b12x
 - PyPI package `b12x`, version **1.2.3**, author **Luke Alonso**
-- Described upstream as a *"DGX Spark and RTX 6000-focused inference kernel library"*
-- The distribution metadata carries **no homepage, project URL or licence field**.
-  We therefore cannot state its licence here with confidence, and we do not
-  redistribute it. It reaches our stack only as a component of the third-party
-  container image `eugr/spark-vllm-b12x`.
+- Licence: **Apache License 2.0**
+- SM120/SM121 CuTe DSL kernel library for NVFP4 GEMM and MoE, targeting DGX
+  Spark and Blackwell RTX parts
+- Note: the *installed distribution metadata* carries no homepage, project URL
+  or licence field, which is why earlier revisions of this file could not state
+  the licence. The repository does — it is Apache-2.0.
 - `deploy/patches/b12x_ultra_tile_fit.py` modifies one function in this package
   **inside a locally built container image**. No b12x source is copied into this
-  repository.
-- **If you are the maintainer of `b12x`:** please open an issue here — we would
-  like both to attribute the licence correctly and to route
-  [finding 4](README.md#4--b12xs-fc2-tile-upgrade-is-unsafe-on-small-shared-memory-parts-new)
-  to the right place.
+  repository, and it reaches our stack only as a component of the third-party
+  container image `eugr/spark-vllm-b12x`.
+- The underlying defect is filed upstream as
+  [local-inference-lab/b12x#182](https://github.com/local-inference-lab/b12x/issues/182).
 
 ## eugr/spark-vllm-docker
 
