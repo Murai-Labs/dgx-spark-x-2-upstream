@@ -17,7 +17,7 @@ deleted, because the corrections are the useful part.
 |---|---|
 | **It works** | vLLM `main` (post-[#52035](https://github.com/vllm-project/vllm/pull/52035)), built for `sm_121` |
 | **Weights** | `deepseek-ai/DeepSeek-V4-Flash-0731` @ `9e165c30…`, ~79.4 GiB/node |
-| **MoE backend** | **`b12x` — works, after a one-line fix to a tile-selection bug (finding 4)** |
+| **MoE backend** | **`b12x` — works, after locally disabling an unsafe FC2 tile upgrade (finding 4)** |
 | **KV cache** | `fp8_ds_mla` @ `--gpu-memory-utilization 0.88`, 1,389,891 tokens |
 | **Single-stream decode** | **63.7 tok/s** @ 2048-token prompt — **+23.6%** over our DEEPGEMM baseline (n=5, their script, like-for-like) |
 | **Still behind** | MiaAI-Lab publish **68.8** at the same point. We are ~7.4% short. |
@@ -32,11 +32,15 @@ fixed upstream by [#52035](https://github.com/vllm-project/vllm/pull/52035).
 
 This repo sits on top of a lot of other people's work. To make that boundary explicit:
 
-**New here, as far as we can tell — one thing:**
+**New here — less than we first claimed:**
 
-- **The `b12x` FC2 tile-selection bug** (finding 4): root cause, a fix, and the hardware
-  evidence including the measurement that falsifies the obvious wrong explanation. If you
-  take one thing from this repo, take that.
+- **The `b12x` FC2 tile round-trip failure** (finding 4). We hit it in the field, traced
+  it, and filed it. We did **not** discover it: two open upstream PRs
+  ([#39](https://github.com/local-inference-lab/b12x/pull/39),
+  [#146](https://github.com/local-inference-lab/b12x/pull/146)) already fix it, both
+  predating our report, and both with a better fix than ours. What is genuinely ours is
+  the field repro and the shape (`N/K=4096/1024`, `moe_block_size=8`) that neither PR
+  names. Our first version of this section claimed the root cause as new; that was wrong.
 
 **Validation of other people's changes on hardware they couldn't reach:**
 
@@ -85,10 +89,15 @@ or project URL, which is why earlier revisions of this README said the venue was
 The defect is present on current `master`, not only in the 1.2.3 vendored by
 `eugr/spark-vllm-b12x` — checked against the repository before filing.
 
+**It is a duplicate.** [#39](https://github.com/local-inference-lab/b12x/pull/39) (Jul 18)
+and [#146](https://github.com/local-inference-lab/b12x/pull/146) (Aug 12) both fix it and
+both predate our report; we did not find them before filing. A maintainer review of #182
+also corrected three claims in our original report — see finding 4.
+
 **Timing note.** b12x is being integrated into vLLM
 ([vllm-project/vllm#40082](https://github.com/vllm-project/vllm/pull/40082)). If it lands
-with this bug, every GB10 user hits it on first boot — after a full weight load — with an
-error that gives no hint it is a shared-memory-class problem.
+before either PR does, every GB10 user hits this on first boot — after a full weight load
+— with an error that names the tile but not the round-trip that produced it.
 
 The clamp-allowlist item is **not** filed. It is a lead, not a validated fix (see above),
 and we would rather test it end-to-end first than file something we cannot stand behind.
@@ -179,13 +188,15 @@ Their patch tracks current `main` correctly. We did not re-check before writing 
 Recorded rather than deleted, because "verify the upstream state before reporting a
 downstream bug" is the actual lesson.
 
-### 4. ⭐ `b12x`'s FC2 tile upgrade is unsafe on small-shared-memory parts (new)
+### 4. `b12x`'s FC2 tile upgrade cannot survive its own re-pin (revised twice)
 
-**This is the finding most likely to be useful to other DGX Spark users**, and it
-supersedes a claim in an earlier version of this repo that b12x "cannot serve
-DeepSeek-V4 at all." That claim was about `flashinfer_b12x` (finding 2). The separate
-**`b12x` MoE backend on the MXFP4 path** reaches the model fine — it clears the clamp
-guard entirely — and then dies later, for an unrelated reason:
+**This section has been corrected twice and is the more useful for it.** It supersedes an
+earlier claim that b12x "cannot serve DeepSeek-V4 at all" (that was `flashinfer_b12x` —
+finding 2), and a **maintainer review of our upstream report then corrected three claims
+we made here**. Both the original and the corrections are kept below.
+
+The `b12x` MoE backend on the MXFP4 path reaches the model fine — it clears the clamp
+guard entirely — and then dies:
 
 ```
 ValueError: force_tile_config fc2 tile (tile_k=32, tile_n=512)
@@ -193,32 +204,71 @@ ValueError: force_tile_config fc2 tile (tile_k=32, tile_n=512)
 ```
 
 **Root cause.** In `b12x/moe/_shared/kernels/w4a16/kernel.py`, an opportunistic "ultra"
-path widens the FC2 output tile from `(64, 256)` to `(32, 512)`. It gates itself on
-`_shared_memory_footprint(...) <= max_shared_mem - 512`, which passes. The upgraded tiles
-are then handed downstream as an explicit `force_tile_config` pin and re-checked by
-`_candidate_tile_fits()` — a **stricter** predicate — which rejects them. Two
-shared-memory models inside one library disagreeing.
+path widens the FC2 output tile from `(64, 256)` to `(32, 512)` to wave-balance FC2
+against FC1. Those tiles then make a round trip the selector doesn't account for:
+`:13308-13311` packs them into `launch_tail`; `:11006-11009` re-pins them as
+`force_tile_config` across the Torch custom-op boundary ("the custom-op boundary cannot
+carry the compiled launch object"); the second compile re-validates them with
+`_candidate_tile_fits()`, which rejects them, and raises.
 
-**Why it bites GB10.** GB10 exposes **101,376 B** of opt-in shared memory per block;
-B200-class parts have ~227 KB. Measured on the hardware:
+**The defect stated precisely: the auto-selector emits a tile config that cannot survive
+its own re-pin.** Any tile the auto path can select must pass the forced re-pin validator;
+this one doesn't.
+
+#### Three things we got wrong
+
+**It is not a shared-memory problem.** `_candidate_tile_fits` rejects the tile at
+`kernel.py:465`, before any footprint math:
+
+```python
+if int(tile_n) < 64 or int(tile_k) < 64 or int(cta_threads) < 128:
+    return False
+smem_bytes = _shared_memory_footprint(...)   # not reached for tile_k=32
+```
+
+`tile_k=32` fails that floor unconditionally. Our hardware table below is correct output
+and the wrong explanation — those rows would read `False` on a B200 with 227 KB too.
 
 | problem K | `(32,512)` ultra | `(64,256)` default |
 |---|---|---|
-| 1024 | ✗ does not fit | ✓ fits |
-| 2048 | ✗ does not fit | ✓ fits |
+| 1024 | ✗ rejected | ✓ fits |
+| 2048 | ✗ rejected | ✓ fits |
 
-The wide tile never fits on this SM class, at any K. **It is a shared-memory-class
-issue, not an artifact of TP sharding** — we initially guessed sharding, and the K=2048
-column falsifies that.
+We used the K=2048 row to rule out TP sharding, which it does. We then read it as proving
+a shared-memory-class problem, which it does not — it is equally explained by the floor,
+and the floor is what the code actually does. **The GB10-vs-B200 framing (101,376 B vs
+~227 KB) was wrong and is withdrawn.** GB10 is where we ran it, not why it broke.
 
-**Fix** — [`deploy/patches/b12x_ultra_tile_fit.py`](deploy/patches/b12x_ultra_tile_fit.py):
-make the upgrade consult the same `_candidate_tile_fits()` that will later judge it, so
-selection falls through to the `(64,256)` default instead of raising. Conservative by
-construction — it can only prevent an upgrade that was going to fail, and cannot alter a
-configuration that already worked.
+**It is not an oversight.** We claimed the FC2 branch forgot what the neighbouring FC1
+branch remembers. `kernel.py:9909-9911` says otherwise, in as many words: *"A 512-wide N
+tile needs tile_k=32 to keep cta_threads=256 (512*32/64); that is below the generic
+tile_k>=64 fits-floor, so we validate the footprint directly here."* The bypass is
+deliberate. The FC1 branch we held up as the counter-example uses `tile_k=64`, which
+clears the floor — which is why it can use the generic predicate and FC2 cannot.
 
-**Result: b12x serves DeepSeek-V4 on GB10, and it is materially faster.** Output verified
-correct by inspection, not just by the absence of a crash.
+**Our patch does not fix it — it disables the optimization.** Given that floor, adding
+`_candidate_tile_fits(..., tile_k=32, ...)` to the upgrade's guard returns `False` on
+every device, every shape, every scale format. There is no "when it won't fit": it never
+fits, so the ultra path becomes dead code. We described it as falling back to `(64,256)`
+"when the wide tile won't fit"; that conditional does not exist.
+
+#### What we actually ship, and what should land upstream
+
+[`deploy/patches/b12x_ultra_tile_fit.py`](deploy/patches/b12x_ultra_tile_fit.py) is a
+**local unblock that disables the ultra FC2 tile**, and is labelled as such. It gets b12x
+serving on GB10. It is not the right upstream fix and we have withdrawn it as a proposal.
+
+The right fix admits the tile rather than removing the upgrade, which is what both
+upstream PRs do — [#146](https://github.com/local-inference-lab/b12x/pull/146) whitelists
+the exact `(tile_k=32, tile_n=512, cta_threads=256)` geometry in the predicate, and
+[#39](https://github.com/local-inference-lab/b12x/pull/39) adds a dedicated predicate plus
+an end-to-end test over the auto-select → re-pin round trip. If you are patching b12x
+yourself, prefer either of those to ours.
+
+**Result: b12x serves DeepSeek-V4 on GB10** with the ultra path disabled, and output is
+verified correct by inspection, not just by the absence of a crash. The throughput gain
+in the next section comes from **using b12x instead of DeepGEMM**, not from this patch —
+see the note under the table.
 
 ---
 
@@ -228,21 +278,28 @@ Using **MiaAI-Lab's own `benchmark-0731.py`**, unmodified, so the comparison is
 like-for-like. Single-stream (c1) decode, tok/s. **All figures below are medians of n=5
 full runs**, with per-run samples in `bench/results/`.
 
-| prompt | ours, DEEPGEMM baseline | ours, **b12x patched** | gain | MiaAI-Lab published |
+| prompt | ours, DEEPGEMM backend | ours, **b12x backend** (patched) | gain | MiaAI-Lab published |
 |---|---|---|---|---|
 | 256 | 53.92 | **65.67** | **+21.8%** | **75.4** |
 | 2048 | 51.52 | **63.70** | **+23.6%** | **68.8** |
 | 8192 | 53.59 | **65.04** | **+21.4%** | — |
 
+**What this measures.** The gain column is **DEEPGEMM vs b12x — a backend switch**. It is
+not the effect of our patch, and earlier versions of this README implied it was. The
+patch's own contribution cannot be measured from here: there is no unpatched-b12x row,
+because unpatched b12x fails init in this configuration. Per finding 4 the patch disables
+an optimization, so its own contribution is at best zero relative to a working ultra path.
+
 Both of our columns are n=5 medians on the same hardware, same script, same
 session. Spread: baseline sd 1.2–3.8; b12x sd 2.0–6.4 (the p2048 spread is
-inflated by one cold first run of 48.4 against a 63–66 cluster).
+inflated by one cold first run of 48.4 against a 63–66 cluster). Raw per-run values are in
+[`bench/results/n5/retune_sweep.log`](bench/results/n5/retune_sweep.log).
 
 Best configuration: `--moe-backend b12x` on the patched image, `fp8_ds_mla` KV,
 `--gpu-memory-utilization 0.88`, k=5. KV pool 1,389,891 tokens.
 
-**We remain ~7.4% behind MiaAI-Lab at p2048 and ~13% at p256.** The one-line tile
-fix closes most of the gap that existed before it, and does not close all of it.
+**We remain ~7.4% behind MiaAI-Lab at p2048 and ~13% at p256.** Moving to the b12x
+backend closes most of the gap that existed before it, and does not close all of it.
 Their remaining advantage is not mysterious — see below.
 
 ### Why we are still behind: `nvfp4_ds_mla` is unreachable on this lineage
@@ -279,6 +336,12 @@ Our first b12x measurement was a single sample and read **65.5 tok/s** at p2048.
 put the median at **60.4** (sd 1.4). The single sample was near the top of the range and
 would have overstated the gain by ~8%. Earlier tables in this repo's history are n=1 and
 should be read as indicative only.
+
+Note that **60.4 is a different arm from the 63.70 in the table above**: it is the
+`rep_b12x` set at default `--gpu-memory-utilization`, while the headline table is the
+`b12x_hi` arm at `0.88` (`bench/results/n5/`, both n=5). We are not quoting the better of
+two runs of the same configuration — but the two arms should not be read as one, and an
+earlier version of this section did not distinguish them.
 
 ### Where tuning helped: KV capacity
 
@@ -320,7 +383,7 @@ larger `k` would pay off. It hasn't, and it doesn't — the 5th draft position l
 | Attempt | Outcome |
 |---|---|
 | `--moe-backend flashinfer_b12x` | SwiGLU clamp guard (finding 2) |
-| `--moe-backend b12x`, unpatched | tile-fit `ValueError` (finding 4) — **fixed by our patch** |
+| `--moe-backend b12x`, unpatched | tile-fit `ValueError` (finding 4) — **unblocked locally by disabling the ultra FC2 tile**; upstream fix is [#39](https://github.com/local-inference-lab/b12x/pull/39)/[#146](https://github.com/local-inference-lab/b12x/pull/146) |
 | `--moe-backend deep_gemm` | loads, dies in kernel: `Unknown SF transformation` |
 | `--moe-backend triton` | "kernel does not support current device" |
 | `--moe-backend marlin` (MXFP4) | selected, loads, **same DeepGEMM error** → proved MoE was never the fault |
@@ -359,7 +422,7 @@ figures for this model vary by more than 3× because harnesses measure different
 docker pull eugr/spark-vllm-b12x:latest
 docker tag  eugr/spark-vllm-b12x:latest vllm-node-b12x:latest
 
-# 2. apply the FC2 tile fix (finding 4) — required on GB10
+# 2. disable the unsafe ultra FC2 tile (finding 4) — required on GB10 until #39/#146 land
 cat > Dockerfile <<'EOF'
 FROM vllm-node-b12x:latest
 COPY b12x_ultra_tile_fit.py /tmp/
@@ -390,7 +453,8 @@ workers (for multi-node PP/TP)"*.
 ## Environment
 
 - 2× NVIDIA DGX Spark, GB10 Blackwell **sm_121**, 128 GB unified LPDDR5X each
-  (101,376 B opt-in shared memory per block, 48 SMs — both relevant to finding 4)
+  (101,376 B opt-in shared memory per block, 48 SMs — the SM count gates the ultra branch
+  in finding 4; the shared-memory figure turned out **not** to be why it fails)
 - 200G ConnectX-7 QSFP56 DAC, RoCEv2 — measured 111 Gb/s `ib_write_bw`, ~13.6 GB/s NCCL all-reduce
 - DGX OS (Ubuntu 24.04), kernel 6.17-nvidia, CUDA 13.0, driver 580.173.02
 - vLLM `main` @ `0.27.2rc1.dev48+g64ca614fe`, torch 2.13.0+cu130, FlashInfer 0.6.18, Triton 3.7.1
